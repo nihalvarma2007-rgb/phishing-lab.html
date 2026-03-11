@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Phishing Email Detection</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+body{
+  margin:0;
+  font-family:'Courier New',monospace;
+  background:#000;
+  color:#0f0;
+  overflow:hidden;
+}
+#matrixCanvas{
+  position:fixed;
+  top:0; left:0;
+  width:100%;
+  height:100%;
+  z-index:-1;
+  background:#000;
+}
+.container{
+  width:700px;
+  background:rgba(0,0,0,0.85);
+  padding:25px;
+  border-radius:15px;
+  box-shadow:0 0 25px #0ff,0 0 50px #0ff50 inset;
+  margin:50px auto;
+}
+h1{
+  text-align:center;
+  color:#0f0;
+  text-shadow:0 0 15px #0f0,0 0 30px #0ff,0 0 50px #0ff50;
+}
+textarea,input[type=text]{
+  width:100%;
+  background:#111;
+  color:#0f0;
+  border:none;
+  padding:10px;
+  border-radius:8px;
+  font-family:monospace;
+  outline:none;
+  margin-bottom:10px;
+  transition:0.3s;
+}
+textarea:hover,input[type=text]:hover{
+  box-shadow:0 0 8px #0f0 inset;
+}
+button{
+  padding:12px 25px;
+  border:none;
+  border-radius:8px;
+  background:#0f0;
+  color:#000;
+  font-weight:bold;
+  cursor:pointer;
+  margin-top:10px;
+  transition:0.3s;
+}
+button:hover{transform:scale(1.05);background:#0ffa0f;}
+button.glow{animation: glow 1s infinite alternate;}
+@keyframes glow{
+  from{box-shadow:0 0 15px #f00,0 0 30px #f00 inset;}
+  to{box-shadow:0 0 30px #f44,0 0 50px #f44 inset;}
+}
+.progress{
+  height:30px;
+  background:#111;
+  border-radius:15px;
+  margin-top:15px;
+  overflow:hidden;
+  box-shadow:0 0 5px #0f0 inset;
+}
+.bar{
+  height:100%;
+  width:0%;
+  text-align:center;
+  line-height:30px;
+  font-weight:bold;
+  transition:0.3s;
+}
+.result, .links, .safety{
+  margin-top:15px;
+  font-size:16px;
+  min-height:20px;
+  opacity:0;
+  transition:opacity 0.5s;
+}
+.links{color:#ff4d4d;}
+.safety{
+  background:rgba(0,255,0,0.05);
+  padding:10px;
+  border-radius:8px;
+  white-space:pre-wrap;
+}
+</style>
+</head>
+<body>
+
+<canvas id="matrixCanvas"></canvas>
+
+<div class="container">
+<h1>⚠ Phishing Email Detection ⚠</h1>
+
+<input type="text" id="fromHeader" placeholder="Email Header (From / Reply-To)">
+<textarea id="emailContent" placeholder="Paste email content here..."></textarea>
+<button onclick="analyze()">Analyze Email</button>
+<button id="pdfBtn" onclick="downloadPDF()">Download PDF Report</button>
+
+<div class="progress"><div class="bar" id="scoreBar">0%</div></div>
+<div class="result" id="result"></div>
+<div class="links" id="links"></div>
+<div class="safety" id="safety"></div>
+</div>
+
+<script>
+// CRAZY MATRIX BACKGROUND
+const canvas=document.getElementById("matrixCanvas");
+const ctx=canvas.getContext("2d");
+canvas.width=window.innerWidth;
+canvas.height=window.innerHeight;
+
+const fontSize = 18;
+const columns = Math.floor(canvas.width / fontSize);
+const drops = [];
+for(let x=0;x<columns;x++) drops[x] = Math.random()*canvas.height;
+
+const symbols = 'アァカサタナハマヤャラワガザダバパイィキシチニヒミリギジヂビピウゥクスツヌフムユュルグズブプエェケセテネヘメレゲゼデベペオォコソトノホモヨョロヲゴゾドボポ0123456789@#$%&*';
+
+function drawMatrix(){
+  ctx.fillStyle="rgba(0,0,0,0.05)";
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle="#0f0";
+  ctx.font=fontSize+"px monospace";
+  
+  for(let i=0;i<drops.length;i++){
+    const text = symbols.charAt(Math.floor(Math.random()*symbols.length));
+    ctx.fillText(text,i*fontSize,drops[i]);
+    drops[i] += fontSize + Math.random()*10;
+    if(drops[i] > canvas.height && Math.random() > 0.975) drops[i]=0;
+  }
+}
+
+setInterval(drawMatrix,35);
+window.onresize=()=>{
+  canvas.width=window.innerWidth;
+  canvas.height=window.innerHeight;
+};
+
+// PHISHING DETECTION
+let lastAnalysis={};
+const phishingWords=["urgent","verify your account","login immediately","bank details","click here","password","free money","limited offer","security alert","confirm identity","suspended","account locked"];
+const fakeDomains=["paypal-secure.com","bank-login.net","secure-update.com","verify-account.org"];
+
+function typeWriter(element,text,callback){
+  element.style.opacity=1;
+  element.innerHTML="";
+  let i=0;
+  const interval=setInterval(()=>{
+    element.innerHTML+=text.charAt(i);
+    i++;
+    if(i>=text.length){clearInterval(interval); if(callback) callback();}
+  },20);
+}
+
+function analyze(){
+  const email=document.getElementById("emailContent").value;
+  const header=document.getElementById("fromHeader").value;
+  let score=0,linkText="",safetyText="",headerSuspicious=false;
+  const emailLower=email.toLowerCase();
+  const headerLower=header.toLowerCase();
+
+  phishingWords.forEach(word=>{if(emailLower.includes(word)) score+=8;});
+  let urlRegex=/https?:\/\/[^\s]+/g;
+  let urls=email.match(urlRegex);
+  if(urls){
+    score+=urls.length*10;
+    urls.forEach(url=>{
+      linkText+="🔗 "+url+"\n";
+      fakeDomains.forEach(fd=>{if(url.includes(fd)) score+=15;});
+    });
+  }
+  fakeDomains.forEach(fd=>{if(headerLower.includes(fd)){score+=15;headerSuspicious=true;}});
+  if(score>100) score=100;
+
+  const bar=document.getElementById("scoreBar");
+  bar.style.width=score+"%";
+  bar.innerHTML=score+"%";
+  if(score<30){bar.style.background="#00ff00"; document.getElementById("pdfBtn").classList.remove("glow");}
+  else if(score<60){bar.style.background="#ffaa00"; document.getElementById("pdfBtn").classList.remove("glow");}
+  else{bar.style.background="#ff0000"; document.getElementById("pdfBtn").classList.add("glow");}
+
+  const result=document.getElementById("result");
+  const linksDiv=document.getElementById("links");
+  const safety=document.getElementById("safety");
+
+  if(score<30){typeWriter(result,"✅ SAFE EMAIL"); safetyText="";}
+  else if(score<60){typeWriter(result,"⚠ SUSPICIOUS EMAIL"); safetyText="Recommended Actions:\n- Do not click links or download attachments.\n- Verify sender manually.\n- Check for spelling mistakes.";}
+  else{typeWriter(result,"❌ PHISHING EMAIL DETECTED"); safetyText="Immediate Safety Measures:\n- Do NOT click links.\n- Do NOT reply.\n- Mark as spam/phishing.\n- Change passwords.\n- Enable 2FA.\n- Report to IT/security team."; if(headerSuspicious)safetyText+="\n⚠ Header appears suspicious (domain spoofing)";}
+
+  linksDiv.style.opacity=0;
+  setTimeout(()=>{linksDiv.innerText=linkText; linksDiv.style.opacity=1;},200);
+  typeWriter(safety,safetyText);
+
+  lastAnalysis={email,header,score,linkText,safetyText};
+}
+
+function downloadPDF(){
+  if(!lastAnalysis.email){alert("Please analyze an email first!"); return;}
+  const { jsPDF }=window.jspdf;
+  const doc=new jsPDF();
+  let y=10;
+  doc.setFont("Courier"); doc.setFontSize(12);
+  doc.text("Phishing Report",10,y); y+=10;
+  doc.text("From Header: "+lastAnalysis.header,10,y); y+=10;
+  doc.text("Phishing Score: "+lastAnalysis.score+"%",10,y); y+=10;
+  doc.text("Email Content:",10,y); y+=10;
+  const lines=doc.splitTextToSize(lastAnalysis.email,180); doc.text(lines,10,y); y+=lines.length*6+5;
+  if(lastAnalysis.linkText){doc.text("Suspicious Links:",10,y); y+=10; doc.text(doc.splitTextToSize(lastAnalysis.linkText,180),10,y);}
+  doc.text("Safety Measures:",10,y+=10); doc.text(doc.splitTextToSize(lastAnalysis.safetyText,180),10,y);
+  doc.save("Phishing_Report.pdf");
+}
+</script>
+</body>
+</html>
